@@ -23,7 +23,7 @@ use carla::{
 use cdr::{CdrLe, Infinite};
 use nalgebra::{coordinates::XYZ, UnitQuaternion};
 use zenoh::{Session, Wait};
-use zenoh_ros_type::{geometry_msgs, sensor_msgs, std_msgs};
+use zenoh_ros_type::{geometry_msgs, rmw_zenoh::Attachment, sensor_msgs, std_msgs};
 
 use super::actor_bridge::{ActorBridge, BridgeType};
 use crate::{
@@ -31,7 +31,7 @@ use crate::{
     error::{BridgeError, Result},
     put_with_attachment,
     types::{GnssService, GnssStatus, PointFieldType},
-    utils,
+    utils, Mode,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -123,9 +123,6 @@ impl SensorBridge {
         let (tx, rx) = mpsc::channel();
         let key_list = autoware.get_sensors_key(sensor_type, &sensor_name);
 
-        // Generate rmw_zenoh-compatible attachment
-        let attachment = utils::generate_attachment();
-
         match sensor_type {
             SensorType::CameraRgb => {
                 register_camera_rgb(
@@ -134,7 +131,6 @@ impl SensorBridge {
                     key_list,
                     tx.clone(),
                     rx,
-                    attachment.clone(),
                     autoware.mode.clone(),
                 )?;
             }
@@ -145,7 +141,6 @@ impl SensorBridge {
                     key_list,
                     tx.clone(),
                     rx,
-                    attachment.clone(),
                     autoware.mode.clone(),
                 )?;
             }
@@ -156,7 +151,6 @@ impl SensorBridge {
                     key_list,
                     tx.clone(),
                     rx,
-                    attachment.clone(),
                     autoware.mode.clone(),
                 )?;
             }
@@ -167,7 +161,6 @@ impl SensorBridge {
                     key_list,
                     tx.clone(),
                     rx,
-                    attachment.clone(),
                     autoware.mode.clone(),
                 )?;
             }
@@ -178,7 +171,6 @@ impl SensorBridge {
                     key_list,
                     tx.clone(),
                     rx,
-                    attachment.clone(),
                     autoware.mode.clone(),
                 )?;
             }
@@ -212,8 +204,7 @@ fn register_camera_rgb(
     key_list: Option<Vec<String>>,
     tx: Sender<(MessageType, Vec<u8>)>,
     rx: Receiver<(MessageType, Vec<u8>)>,
-    attachment: Vec<u8>,
-    mode: crate::Mode,
+    mode: Mode,
 ) -> Result<()> {
     let key_list = key_list.ok_or(BridgeError::CarlaIssue("No sesnsor exists"))?;
     let raw_key = key_list[0].clone();
@@ -221,23 +212,29 @@ fn register_camera_rgb(
 
     let image_publisher = z_session.declare_publisher(raw_key.clone()).wait()?;
     let info_publisher = z_session.declare_publisher(info_key.clone()).wait()?;
-    thread::spawn(move || loop {
-        match rx.recv() {
-            Ok((MessageType::SensorData, sensor_data)) => {
-                if let Err(e) = put_with_attachment!(image_publisher, sensor_data, attachment, mode)
-                {
-                    log::error!("Failed to publish to {raw_key}: {e:?}");
+    thread::spawn(move || {
+        let mut attachment = Attachment::new();
+        loop {
+            match rx.recv() {
+                Ok((MessageType::SensorData, sensor_data)) => {
+                    if let Err(e) =
+                        put_with_attachment!(image_publisher, sensor_data, attachment, mode)
+                    {
+                        log::error!("Failed to publish to {raw_key}: {e:?}");
+                    }
                 }
-            }
-            Ok((MessageType::InfoData, info_data)) => {
-                if let Err(e) = put_with_attachment!(info_publisher, info_data, attachment, mode) {
-                    log::error!("Failed to publish to {info_key}: {e:?}");
+                Ok((MessageType::InfoData, info_data)) => {
+                    if let Err(e) =
+                        put_with_attachment!(info_publisher, info_data, attachment, mode)
+                    {
+                        log::error!("Failed to publish to {info_key}: {e:?}");
+                    }
                 }
-            }
-            _ => {
-                // If tx is released, then the thread will stop
-                log::info!("Sensor actor thread for {raw_key} stop.");
-                break;
+                _ => {
+                    // If tx is released, then the thread will stop
+                    log::info!("Sensor actor thread for {raw_key} stop.");
+                    break;
+                }
             }
         }
     });
@@ -293,23 +290,27 @@ fn register_lidar_raycast(
     key_list: Option<Vec<String>>,
     tx: Sender<(MessageType, Vec<u8>)>,
     rx: Receiver<(MessageType, Vec<u8>)>,
-    attachment: Vec<u8>,
-    mode: crate::Mode,
+    mode: Mode,
 ) -> Result<()> {
     let key_list = key_list.ok_or(BridgeError::CarlaIssue("No sesnsor exists"))?;
     let key = key_list[0].clone();
     let pcd_publisher = z_session.declare_publisher(key.clone()).wait()?;
-    thread::spawn(move || loop {
-        match rx.recv() {
-            Ok((MessageType::SensorData, sensor_data)) => {
-                if let Err(e) = put_with_attachment!(pcd_publisher, sensor_data, attachment, mode) {
-                    log::error!("Failed to publish to {key}: {e:?}");
+    thread::spawn(move || {
+        let mut attachment = Attachment::new();
+        loop {
+            match rx.recv() {
+                Ok((MessageType::SensorData, sensor_data)) => {
+                    if let Err(e) =
+                        put_with_attachment!(pcd_publisher, sensor_data, attachment, mode)
+                    {
+                        log::error!("Failed to publish to {key}: {e:?}");
+                    }
                 }
-            }
-            _ => {
-                // If tx is released, then the thread will stop
-                log::info!("Sensor actor thread for {key} stop.");
-                break;
+                _ => {
+                    // If tx is released, then the thread will stop
+                    log::info!("Sensor actor thread for {key} stop.");
+                    break;
+                }
             }
         }
     });
@@ -334,23 +335,27 @@ fn register_lidar_raycast_semantic(
     key_list: Option<Vec<String>>,
     tx: Sender<(MessageType, Vec<u8>)>,
     rx: Receiver<(MessageType, Vec<u8>)>,
-    attachment: Vec<u8>,
-    mode: crate::Mode,
+    mode: Mode,
 ) -> Result<()> {
     let key_list = key_list.ok_or(BridgeError::CarlaIssue("No sesnsor exists"))?;
     let key = key_list[0].clone();
     let pcd_publisher = z_session.declare_publisher(key.clone()).wait()?;
-    thread::spawn(move || loop {
-        match rx.recv() {
-            Ok((MessageType::SensorData, sensor_data)) => {
-                if let Err(e) = put_with_attachment!(pcd_publisher, sensor_data, attachment, mode) {
-                    log::error!("Failed to publish to {key}: {e:?}");
+    thread::spawn(move || {
+        let mut attachment = Attachment::new();
+        loop {
+            match rx.recv() {
+                Ok((MessageType::SensorData, sensor_data)) => {
+                    if let Err(e) =
+                        put_with_attachment!(pcd_publisher, sensor_data, attachment, mode)
+                    {
+                        log::error!("Failed to publish to {key}: {e:?}");
+                    }
                 }
-            }
-            _ => {
-                // If tx is released, then the thread will stop
-                log::info!("Sensor actor thread for {key} stop.");
-                break;
+                _ => {
+                    // If tx is released, then the thread will stop
+                    log::info!("Sensor actor thread for {key} stop.");
+                    break;
+                }
             }
         }
     });
@@ -375,23 +380,27 @@ fn register_imu(
     key_list: Option<Vec<String>>,
     tx: Sender<(MessageType, Vec<u8>)>,
     rx: Receiver<(MessageType, Vec<u8>)>,
-    attachment: Vec<u8>,
-    mode: crate::Mode,
+    mode: Mode,
 ) -> Result<()> {
     let key_list = key_list.ok_or(BridgeError::CarlaIssue("No sesnsor exists"))?;
     let key = key_list[0].clone();
     let imu_publisher = z_session.declare_publisher(key.clone()).wait()?;
-    thread::spawn(move || loop {
-        match rx.recv() {
-            Ok((MessageType::SensorData, sensor_data)) => {
-                if let Err(e) = put_with_attachment!(imu_publisher, sensor_data, attachment, mode) {
-                    log::error!("Failed to publish to {key}: {e:?}");
+    thread::spawn(move || {
+        let mut attachment = Attachment::new();
+        loop {
+            match rx.recv() {
+                Ok((MessageType::SensorData, sensor_data)) => {
+                    if let Err(e) =
+                        put_with_attachment!(imu_publisher, sensor_data, attachment, mode)
+                    {
+                        log::error!("Failed to publish to {key}: {e:?}");
+                    }
                 }
-            }
-            _ => {
-                // If tx is released, then the thread will stop
-                log::info!("Sensor actor thread for {key} stop.");
-                break;
+                _ => {
+                    // If tx is released, then the thread will stop
+                    log::info!("Sensor actor thread for {key} stop.");
+                    break;
+                }
             }
         }
     });
@@ -415,24 +424,33 @@ fn register_gnss(
     key_list: Option<Vec<String>>,
     tx: Sender<(MessageType, Vec<u8>)>,
     rx: Receiver<(MessageType, Vec<u8>)>,
-    attachment: Vec<u8>,
-    mode: crate::Mode,
+    mode: Mode,
 ) -> Result<()> {
     let key_list = key_list.ok_or(BridgeError::CarlaIssue("No sesnsor exists"))?;
     let key = key_list[0].clone();
     let gnss_publisher = z_session.declare_publisher(key.clone()).wait()?;
-    thread::spawn(move || loop {
-        match rx.recv() {
-            Ok((MessageType::SensorData, sensor_data)) => {
-                if let Err(e) = put_with_attachment!(gnss_publisher, sensor_data, attachment, mode)
-                {
-                    log::error!("Failed to publish to {key}: {e:?}");
+    thread::spawn(move || {
+        let mut attachment = Attachment::new();
+        loop {
+            match rx.recv() {
+                Ok((MessageType::SensorData, sensor_data)) => {
+                    let result = if mode == Mode::RmwZenoh {
+                        gnss_publisher
+                            .put(sensor_data)
+                            .attachment(attachment.serialize(true))
+                            .wait()
+                    } else {
+                        gnss_publisher.put(sensor_data).wait()
+                    };
+                    if let Err(e) = result {
+                        log::error!("Failed to publish to {key}: {e:?}");
+                    }
                 }
-            }
-            _ => {
-                // If tx is released, then the thread will stop
-                log::info!("Sensor actor thread for {key} stop.");
-                break;
+                _ => {
+                    // If tx is released, then the thread will stop
+                    log::info!("Sensor actor thread for {key} stop.");
+                    break;
+                }
             }
         }
     });

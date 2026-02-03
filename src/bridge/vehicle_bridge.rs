@@ -19,6 +19,7 @@ use zenoh_ros_type::{
         TurnIndicatorsReport, VelocityReport,
     },
     builtin_interfaces::Time,
+    rmw_zenoh::Attachment,
     std_msgs::Header,
     tier4_control_msgs::{gate_mode_data, GateMode},
     tier4_vehicle_msgs::{
@@ -30,7 +31,7 @@ use super::actor_bridge::{ActorBridge, BridgeType};
 use crate::{
     autoware::Autoware,
     error::{BridgeError, Result},
-    put_with_attachment, utils,
+    put_with_attachment, utils, Mode,
 };
 
 pub struct VehicleBridge<'a> {
@@ -50,8 +51,8 @@ pub struct VehicleBridge<'a> {
     current_actuation_cmd: Arc<ArcSwap<ActuationCommandStamped>>,
     current_gear: Arc<ArcSwap<u8>>,
     current_gate_mode: Arc<ArcSwap<GateMode>>,
-    attachment: Vec<u8>,
-    mode: crate::Mode,
+    attachment: Attachment,
+    mode: Mode,
     tau: f32,
     prev_timestamp: Option<f64>,
     prev_steer_output: f32,
@@ -185,7 +186,7 @@ impl<'a> VehicleBridge<'a> {
             .wait()?;
 
         // Generate rmw_zenoh-compatible attachment
-        let attachment = utils::generate_attachment();
+        let attachment = Attachment::new();
 
         Ok(VehicleBridge {
             vehicle_name,

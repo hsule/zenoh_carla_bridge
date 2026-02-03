@@ -5,13 +5,13 @@ use std::{
 
 use cdr::{CdrLe, Infinite};
 use zenoh::{pubsub::Publisher, Session, Wait};
-use zenoh_ros_type::{builtin_interfaces, rosgraph_msgs};
+use zenoh_ros_type::{builtin_interfaces, rmw_zenoh::Attachment, rosgraph_msgs};
 
-use crate::{autoware::topic, error::Result, put_with_attachment, utils, Mode};
+use crate::{autoware::topic, error::Result, put_with_attachment, Mode};
 
 pub struct SimulatorClock<'a> {
     publisher_clock: Publisher<'a>,
-    attachment: Vec<u8>,
+    attachment: Attachment,
     mode: Mode,
 }
 
@@ -24,7 +24,7 @@ impl<'a> SimulatorClock<'a> {
         let publisher_clock = z_session.declare_publisher(key).wait()?;
 
         // Generate rmw_zenoh-compatible attachment
-        let attachment = utils::generate_attachment();
+        let attachment = Attachment::new();
 
         Ok(SimulatorClock {
             publisher_clock,
@@ -33,7 +33,7 @@ impl<'a> SimulatorClock<'a> {
         })
     }
 
-    pub fn publish_clock(&self, timestamp: Option<f64>) -> Result<()> {
+    pub fn publish_clock(&mut self, timestamp: Option<f64>) -> Result<()> {
         let time = if let Some(sec) = timestamp {
             builtin_interfaces::Time {
                 sec: sec.floor() as i32,

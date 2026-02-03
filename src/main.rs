@@ -127,7 +127,7 @@ fn main() -> Result<()> {
     autoware::setup_topics(mode.clone(), z_session.clone());
 
     // Create clock publisher
-    let simulator_clock = SimulatorClock::new(z_session.clone(), mode.clone())
+    let mut simulator_clock = SimulatorClock::new(z_session.clone(), mode.clone())
         .expect("Unable to create simulator clock!");
 
     // Create thread for ticking
